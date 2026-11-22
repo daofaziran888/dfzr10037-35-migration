@@ -10,10 +10,15 @@ class BaseModuleService:
     MODULE = ""
     ENTITY = ""
     LIST_FIELDS: list[str] = []
+    FILTER_FIELDS: list[str] = []
     REQUIRED_FIELDS: list[str] = []
     STATUS_ORDER: list[str] = []
     ACTION_RULES: dict[str, str] = {}
     NEGATIVE_ACTIONS: list[str] = []
+
+    def filter_fields(self) -> list[str]:
+        """可筛选字段：列表字段 + 模块额外开放的二版字段（如跳数状态）。"""
+        return [*self.LIST_FIELDS, *self.FILTER_FIELDS]
 
     def list_entries(
         self,
@@ -25,8 +30,9 @@ class BaseModuleService:
         size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
         rows = list(store.rows(self.MODULE))
+        allowed = set(self.filter_fields())
         for field, expected in (filters or {}).items():
-            if field in self.LIST_FIELDS:
+            if field in allowed:
                 rows = [
                     row for row in rows
                     if expected.casefold() in str(row.get(field, "")).casefold()

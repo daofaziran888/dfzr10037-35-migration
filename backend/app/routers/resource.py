@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from app.schemas import ActionPayload, ActionResult, EntryPayload, PageResult
 from app.services import service_for
+from app.services import hop_store
 
 router = APIRouter(prefix="/api", tags=["业务资源"])
 
@@ -31,10 +32,12 @@ def list_entries(
     size: int = Query(default=20, ge=1, le=200),
 ) -> PageResult[dict]:
     service = require_service(module)
+    hop_store.ensure_migrated()
+    allowed_filters = set(service.filter_fields())
     filters = {
         key: value.strip()
         for key, value in request.query_params.items()
-        if key in service.LIST_FIELDS and value.strip()
+        if key in allowed_filters and value.strip()
     }
     items, total = service.list_entries(
         filters=filters, keyword=keyword, status=status, page=page, size=size)
@@ -49,20 +52,30 @@ def export_entries(
     status: str | None = Query(default=None),
 ) -> StreamingResponse:
     service = require_service(module)
+    hop_store.ensure_migrated()
+    allowed_filters = set(service.filter_fields())
     filters = {
         key: value.strip()
         for key, value in request.query_params.items()
-        if key in service.LIST_FIELDS and value.strip()
+        if key in allowed_filters and value.strip()
     }
     items, _ = service.list_entries(
         filters=filters, keyword=keyword, status=status, page=1, size=1_000_000)
     output = io.StringIO()
     output.write("\ufeff")
     writer = csv.writer(output, lineterminator="\n")
-    writer.writerow(["id", *service.LIST_FIELDS, "status"])
+    columns = ["id", *service.LIST_FIELDS, "status"]
+    hop_columns = [
+        "\u8df3\u6570\u7248\u672c", "\u53ef\u8ba1\u7b97\u8df3\u6570", "\u8df3\u6570\u72b6\u6001", "\u8df3\u6570\u53ef\u6267\u884c", "\u8df3\u6570\u539f\u5b57\u9762", "\u8df3\u6570\u8fb9\u754c", "\u91c7\u7528\u6a21\u677f"
+    ]
+    if module in ("graph_search", "subgraph_exp"):
+        columns.extend(hop_columns)
+    writer.writerow(columns)
     for item in items:
         values = [item.get("id"), *(item.get(field, "") for field in service.LIST_FIELDS),
                   item.get("status", "")]
+        if module in ("graph_search", "subgraph_exp"):
+            values.extend(item.get(field, "") for field in hop_columns)
         writer.writerow([
             "'" + str(value) if str(value or "").startswith(("=", "+", "-", "@")) else value
             for value in values
